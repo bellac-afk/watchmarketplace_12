@@ -1,0 +1,81 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: watch-postgres
+    environment:
+      POSTGRES_USER: watchuser
+      POSTGRES_PASSWORD: watchpass123
+      POSTGRES_DB: watchmarketplace
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    networks:
+      - watch-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U watchuser -d watchmarketplace"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: watch-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - ./redis_data:/data
+    networks:
+      - watch-network
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: watch-backend
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://watchuser:watchpass123@postgres:5432/watchmarketplace?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: changeme-secret-key-minimum-32-characters-long
+      JWT_REFRESH_SECRET: changeme-refresh-key-minimum-32-characters-long
+      PORT: 3001
+    volumes:
+      - ./backend/uploads:/app/uploads
+    ports:
+      - "127.0.0.1:3001:3001"
+    networks:
+      - watch-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: watch-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: https://charodejki.ru/api
+      NEXT_PUBLIC_APP_URL: https://charodejki.ru
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - watch-network
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: watch-nginx
+    ports:
+      - "8080:80"
+    volumes:
+      - ./docker/nginx/nginx-isp.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - watch-network
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+
+networks:
+  watch-network:
+    driver: bridge
